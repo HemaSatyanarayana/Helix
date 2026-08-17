@@ -1,0 +1,34 @@
+# --- API / serving ---
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# --- LLM / RAG ---
+anthropic
+langchain
+langchain-community
+langchain-anthropic
+
+# --- Embeddings / vector store ---
+sentence-transformers
+qdrant-client
+
+# --- Ingestion / document parsing ---
+pypdf
+unstructured
+
+# --- Workers / queue ---
+celery
+redis
+
+# --- Utilities ---
+httpx
+python-dotenv
+tenacity
+
+# --- Dev / test ---
+pytest
+pytest-asyncio
+ruff
+mypy
