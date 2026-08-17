@@ -1,26 +1,49 @@
-# Makefile for RAG-Production-Grade
-# Python environment management
+# Makefile for Helix — production-grade agentic RAG
 
-PYTHON := python3
-VENV := .venv
-VENV_BIN := $(VENV)/bin
+# Source of documents to ingest (override: `make ingest SRC=path/to/docs`)
+SRC ?= data
 
-.PHONY: help venv install clean freeze
+.PHONY: help install services services-down worker ui \
+        ingest ingest-append reset-index clean
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-venv:  ## Create the virtual environment
-	$(PYTHON) -m venv $(VENV)
-	$(VENV_BIN)/pip install --upgrade pip setuptools wheel
+# --- Environment ----------------------------------------------------------
 
-install: venv  ## Create venv and install dependencies from requirements.txt
-	@test -f requirements.txt && $(VENV_BIN)/pip install -r requirements.txt || echo "No requirements.txt found."
+install:  ## Create the uv environment and install dependencies
+	uv sync
 
-freeze:  ## Write current dependencies to requirements.txt
-	$(VENV_BIN)/pip freeze > requirements.txt
+# --- Infrastructure -------------------------------------------------------
 
-clean:  ## Remove the virtual environment and caches
-	rm -rf $(VENV)
+services:  ## Start Qdrant + Redis + Jaeger (docker compose)
+	docker compose up -d
+
+services-down:  ## Stop the infrastructure containers
+	docker compose down
+
+# --- Ingestion ------------------------------------------------------------
+
+reset-index:  ## Delete ALL vectors (drop the Qdrant collection)
+	uv run python scripts/ingest.py --reset
+
+ingest:  ## Wipe ALL data, then ingest SRC (default: data/)
+	uv run python scripts/ingest.py --reset $(SRC)
+
+ingest-append:  ## Incrementally ingest SRC WITHOUT wiping (per-doc re-ingest)
+	uv run python scripts/ingest.py $(SRC)
+
+# --- Runtime --------------------------------------------------------------
+
+worker:  ## Run the Celery ingestion worker (async / UI ingestion)
+	PYTHONPATH=ingestion-workers:. uv run celery -A worker worker --loglevel=info
+
+ui:  ## Launch the Streamlit UI
+	uv run streamlit run ui/app.py
+
+# --- Housekeeping ---------------------------------------------------------
+
+clean:  ## Remove the venv and Python caches
+	rm -rf .venv
 	find . -type d -name __pycache__ -exec rm -rf {} +

@@ -4,6 +4,10 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 
+# --- UI ---
+streamlit
+python-dotenv
+
 # --- LLM / RAG ---
 anthropic
 langchain
@@ -21,6 +25,12 @@ unstructured
 # --- Workers / queue ---
 celery
 redis
+
+# --- Observability ---
+logfire[fastapi,celery,httpx,system-metrics]
+
+# --- LLM gateway ---
+openai  # OpenRouter is OpenAI-compatible; used as the LLM client
 
 # --- Utilities ---
 httpx

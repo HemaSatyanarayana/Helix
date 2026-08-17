@@ -29,6 +29,18 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local trace UI for Logfire/OpenTelemetry. No cloud account needed.
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: rag-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger web UI
+      - "4318:4318"     # OTLP HTTP receiver (Logfire exports here)
+      - "4317:4317"     # OTLP gRPC receiver
+
 volumes:
   qdrant_data:
   redis_data:
