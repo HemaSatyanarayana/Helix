@@ -32,6 +32,9 @@ logfire[fastapi,celery,httpx,system-metrics]
 # --- LLM gateway ---
 openai  # OpenRouter is OpenAI-compatible; used as the LLM client
 
+# --- Reranking ---
+cohere  # Cohere Rerank (rerank-english-v3.0)
+
 # --- Utilities ---
 httpx
 python-dotenv

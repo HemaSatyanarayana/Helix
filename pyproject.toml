@@ -6,7 +6,11 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "celery>=5.6.3",
+    "cohere>=7.0.8",
     "docling>=2.120.2",
+    "fastapi>=0.141.1",
+    "fastembed>=0.8.0",
+    "langgraph>=1.2.11",
     "logfire[celery,fastapi,httpx,system-metrics]>=4.40.0",
     "openai>=3.1.0",
     "python-dotenv>=1.2.3",
@@ -14,4 +18,46 @@ dependencies = [
     "redis>=8.1.0",
     "sentence-transformers>=5.7.0",
     "streamlit>=1.61.1",
+    "torch>=2.2.2",
+    "torchvision>=0",
+    "uvicorn[standard]>=0.52.3",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pyyaml>=6.0",
+]
+
+# torch is a transitive dependency (via sentence-transformers and docling) and
+# defaults to CUDA wheels, which pull several GB of nvidia-* packages neither
+# the container nor local dev ever uses — nothing here runs GPU inference.
+# Pinning it to the CPU-only index turns a multi-gigabyte image into one about
+# 90% smaller, and makes the resolved lockfile the same on every machine
+# regardless of what GPU (if any) happens to be present when `uv sync` runs.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+# Marker-gated: PyPI's own macOS wheels are already CPU-only (no CUDA build
+# exists for macOS), and the pytorch-cpu index doesn't publish macOS wheels at
+# all — an unconditional override breaks resolution for any Mac contributor.
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", marker = "sys_platform != 'darwin'" },
+]
+
+[tool.pytest.ini_options]
+# Repo root on sys.path so tests can import `evals` and `app`.
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "slow: needs a populated Qdrant and live LLM/rerank calls; excluded by default (see Makefile's test-eval target)",
+]
+# `slow` (the retrieval eval regression gate) needs real infrastructure and
+# costs real API calls, so it's opt-in rather than part of every `pytest` run.
+addopts = "-m 'not slow'"

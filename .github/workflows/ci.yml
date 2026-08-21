@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Fast, deterministic, no external services or API keys — every PR.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run pytest -v
+      - run: uv run python -c "import ast; ast.parse(open('ui/app.py').read())"
+
+  # Builds the runtime image and boots the API against real Qdrant/Redis, no
+  # LLM key needed — this catches "the container doesn't start", "the readiness
+  # probe never turns green", and dependency drift between the image and the
+  # lockfile, none of which the unit tests above can see.
+  docker-smoke:
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.15.5
+        ports: ["6333:6333"]
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t helix:ci .
+      - name: Boot the API (no LLM key — checks it starts, not that it answers)
+        run: |
+          docker run -d --name helix-api --network host \
+            -e QDRANT_URL=http://localhost:6333 \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            -e ENVIRONMENT=development \
+            helix:ci
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:8000/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8000/health
+          curl -s http://localhost:8000/readyz | tee /dev/stderr | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); assert 'checks' in d, 'readyz malformed'"
+      - if: always()
+        run: docker logs helix-api
+
+  # The retrieval eval: needs a populated index, an LLM key for routing/query
+  # rewriting, and (optionally) a Cohere key for reranking. Runs against the
+  # real corpus and calls real providers, so it's a separate, non-blocking
+  # job — a Cohere rate limit or a Groq blip shouldn't fail every PR the way a
+  # unit test regression should. See tests/test_retrieval_eval.py.
+  retrieval-eval:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: ${{ vars.RUN_RETRIEVAL_EVAL == 'true' }}
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.15.5
+        ports: ["6333:6333"]
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+    env:
+      QDRANT_URL: http://localhost:6333
+      REDIS_URL: redis://localhost:6379/0
+      LLM_PROVIDER: groq
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run python scripts/ingest.py --reset data
+      - run: uv run pytest tests/test_retrieval_eval.py -v -m slow

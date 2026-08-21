@@ -1,8 +1,15 @@
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    # Pinned: `:latest` on a vector store means a schema-breaking upgrade can
+    # land on a routine `docker compose pull`. Bump deliberately.
+    image: qdrant/qdrant:v1.15.5
     container_name: rag-qdrant
     restart: unless-stopped
+    environment:
+      # Unset (default) leaves Qdrant open on its published port — fine for a
+      # laptop, not for anything reachable from outside it. Set QDRANT_API_KEY
+      # in .env for any non-local deployment.
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
     ports:
       - "6333:6333"   # REST API
       - "6334:6334"   # gRPC API
@@ -15,23 +22,30 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: rag-redis
     restart: unless-stopped
+    # Empty REDIS_PASSWORD keeps local dev password-less; set it for anything
+    # beyond a laptop. `sh -c` because command-line args can't reference an
+    # env var directly.
+    command: >
+      sh -c 'redis-server --appendonly yes
+      ${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     ports:
       - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a \"$$REDIS_PASSWORD\"} ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # Local trace UI for Logfire/OpenTelemetry. No cloud account needed.
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.65.0
     container_name: rag-jaeger
     restart: unless-stopped
     environment:
@@ -41,6 +55,47 @@ services:
       - "4318:4318"     # OTLP HTTP receiver (Logfire exports here)
       - "4317:4317"     # OTLP gRPC receiver
 
+  api:
+    build: .
+    container_name: rag-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # In-compose service names, not localhost — override the .env defaults
+      # written for running the API on the host.
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+      LOCAL_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    ports:
+      - "8000:8000"
+    volumes:
+      # Model weights persist across restarts instead of re-downloading.
+      - model_cache:/home/helix/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    container_name: rag-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "worker", "worker", "--loglevel=info"]
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+      LOCAL_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    volumes:
+      - model_cache:/home/helix/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   qdrant_data:
   redis_data:
+  model_cache:
