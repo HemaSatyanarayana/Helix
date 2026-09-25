@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: helix
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: api
+          image: helix:latest   # rewritten by kustomize — see kustomization.yaml
+          # IfNotPresent (not the "latest" default of Always) so a minikube/
+          # kind image built straight into the node's Docker daemon is used
+          # as-is instead of triggering a registry pull that would fail.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: {name: helix-config}
+            - secretRef: {name: helix-secrets}
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/helix/.cache/huggingface
+          # Loading the dense/sparse encoders at startup (warm_up() in
+          # app/config.py) takes ~12s cold — give it room before liveness/
+          # readiness start counting failures, instead of a long fixed delay.
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            # Also probes Qdrant/the collection/Redis/the LLM key — stays
+            # not-ready until `make ingest` / the ingest Job has populated
+            # the collection, rather than serving empty answers.
+            httpGet: {path: /readyz, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+      volumes:
+        # Per-pod, ephemeral: re-downloaded (~seconds) on every pod restart.
+        # Swap for a PVC (ReadWriteMany, e.g. Filestore-backed) if that cost
+        # matters at your traffic/restart frequency.
+        - name: model-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: helix
+spec:
+  selector: {app: api}
+  ports:
+    - {port: 8000, targetPort: 8000}

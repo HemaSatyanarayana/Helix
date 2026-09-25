@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  namespace: helix
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: ui}
+  template:
+    metadata:
+      labels: {app: ui}
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: ui
+          image: helix:latest   # rewritten by kustomize — see kustomization.yaml
+          imagePullPolicy: IfNotPresent
+          # Streamlit prompts for an onboarding email on first run when
+          # ~/.streamlit/credentials.toml doesn't exist; with no TTY attached
+          # that read blocks/EOFs forever. Seed an empty answer before start
+          # (same fix used to unblock this locally).
+          command: ["sh", "-c"]
+          args:
+            - |
+              mkdir -p /home/helix/.streamlit
+              printf '[general]\nemail = ""\n' > /home/helix/.streamlit/credentials.toml
+              exec streamlit run ui/app.py \
+                --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+          env:
+            - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+              value: "false"
+          ports:
+            - containerPort: 8501
+          # UI runs the chat graph in-process (see ui/app.py) rather than
+          # calling the API over HTTP, so it needs the same LLM/retrieval
+          # config the API pods get, plus REDIS_URL to enqueue ingestion jobs.
+          envFrom:
+            - configMapRef: {name: helix-config}
+            - secretRef: {name: helix-secrets}
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/helix/.cache/huggingface
+          startupProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+      volumes:
+        - name: model-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  namespace: helix
+spec:
+  # Creates an external GCP Network LB with its own public IP on GKE.
+  # Switch to ClusterIP + the Ingress in ingress.yaml if you want a shared
+  # IP/TLS/hostname-based routing instead.
+  type: LoadBalancer
+  selector: {app: ui}
+  ports:
+    - {port: 80, targetPort: 8501}

@@ -1,0 +1,35 @@
+# One-off: populates the Qdrant collection from the `data/` directory baked
+# into the image. Run once after qdrant/redis are up and before api/ui/worker
+# are expected to be Ready (api's /readyz — and therefore its readinessProbe —
+# stays false until this has run). Re-run (`kubectl delete job` first, Jobs
+# are immutable) whenever `data/` changes in a new image build.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: helix-ingest
+  namespace: helix
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: ingest
+          image: helix:latest   # rewritten by kustomize — see kustomization.yaml
+          imagePullPolicy: IfNotPresent
+          command: ["python", "scripts/ingest.py", "--reset", "data"]
+          envFrom:
+            - configMapRef: {name: helix-config}
+            - secretRef: {name: helix-secrets}
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/helix/.cache/huggingface
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+      volumes:
+        - name: model-cache
+          emptyDir: {}

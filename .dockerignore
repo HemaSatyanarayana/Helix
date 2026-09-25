@@ -12,3 +12,4 @@ tests
 *.egg-info
 .mypy_cache
 .ruff_cache
+k8s

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: helix
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+      containers:
+        - name: worker
+          image: helix:latest   # rewritten by kustomize — see kustomization.yaml
+          imagePullPolicy: IfNotPresent
+          command: ["celery", "-A", "worker", "worker", "--loglevel=info"]
+          envFrom:
+            - configMapRef: {name: helix-config}
+            - secretRef: {name: helix-secrets}
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/helix/.cache/huggingface
+          livenessProbe:
+            exec:
+              command: ["celery", "-A", "worker", "inspect", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+      volumes:
+        - name: model-cache
+          emptyDir: {}

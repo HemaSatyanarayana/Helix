@@ -1,0 +1,44 @@
+# Non-secret configuration, mirroring .env.example but pointed at in-cluster
+# service names (qdrant, redis, jaeger) instead of localhost.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helix-config
+  namespace: helix
+data:
+  # --- Infrastructure ---
+  QDRANT_URL: http://qdrant:6333
+  QDRANT_COLLECTION: documents
+  REDIS_URL: redis://redis:6379/0
+
+  # --- Embedding / retrieval ---
+  EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+  TOP_K: "4"
+  RETRIEVAL_SCORE_THRESHOLD: "0.4"
+
+  # --- Reranking (Cohere key lives in the Secret) ---
+  RERANK_ENABLED: "true"
+  RERANKER_MODEL: rerank-english-v3.0
+  RERANK_CANDIDATES: "20"
+  RERANK_TOP_K: "4"
+
+  # --- LLM (Groq key lives in the Secret) ---
+  LLM_PROVIDER: groq
+  LLM_MODEL: openai/gpt-oss-120b
+  LLM_FAST_MODEL: openai/gpt-oss-20b
+  LLM_GUARD_MODEL: openai/gpt-oss-safeguard-20b
+  LLM_FALLBACKS: qwen/qwen3.6-27b,openai/gpt-oss-20b
+
+  # --- API ---
+  RATE_LIMIT_MAX: "20"
+  RATE_LIMIT_WINDOW_SECONDS: "60"
+  MAX_QUESTION_CHARS: "2000"
+  GUARDRAIL_ENABLED: "true"
+  GUARDRAIL_FAIL_CLOSED: "false"
+  # Production refuses to start unauthenticated (see app/config.py) — API_KEYS
+  # (the actual keys) lives in the Secret.
+  API_KEY_REQUIRED: "true"
+
+  # --- Observability ---
+  ENVIRONMENT: production
+  LOCAL_OTLP_ENDPOINT: http://jaeger:4318/v1/traces

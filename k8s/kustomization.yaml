@@ -1,0 +1,21 @@
+namespace: helix
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - qdrant.yaml
+  - redis.yaml
+  - jaeger.yaml
+  - api.yaml
+  - worker.yaml
+  - ui.yaml
+  # helix-ingest is a one-off Job — apply it separately (see README), not as
+  # part of every rollout: `kubectl apply -f k8s/ingest-job.yaml -n helix`.
+
+# Every Deployment/Job above references image "helix:latest" as a stand-in.
+# Point this at your real Artifact Registry image once, and every manifest
+# picks it up — no per-file edits.
+images:
+  - name: helix
+    newName: REGION-docker.pkg.dev/PROJECT_ID/helix-repo/helix
+    newTag: latest
